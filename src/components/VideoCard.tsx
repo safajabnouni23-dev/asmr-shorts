@@ -154,12 +154,15 @@ export default function VideoCard({
     };
   }, [videoId, iframeId, source]);
 
-  // === TikTok Player ===
+  // === TikTok Player — reset when video or active state changes ===
   useEffect(() => {
     if (source !== "tiktok") return;
-    setTiktokLoaded(false);
+    if (isActive) {
+      // Becoming active — reset loading state so iframe re-renders fresh
+      setTiktokLoaded(false);
+    }
     initializedRef.current = false;
-  }, [videoId, source]);
+  }, [videoId, source, isActive]);
 
   // Play/pause based on active state (YouTube only)
   useEffect(() => {
@@ -295,34 +298,33 @@ export default function VideoCard({
         {source === "youtube" ? (
           /* YouTube Player */
           <div id={iframeId} className="h-full w-full" />
-        ) : (
-          /* TikTok Player — Clean Full-Screen with hidden native UI */
-          <div className="h-full w-full relative overflow-hidden">
+        ) : isActive ? (
+          /* TikTok Player — ONLY rendered when active (fixes audio leak) */
+          <div className="h-full w-full relative overflow-hidden bg-black">
             {/* 
-              TikTok embed scaled & cropped to hide native UI:
-              - Top ~60px: TikTok header/logo
-              - Bottom ~120px: description, username, action buttons
-              - Right ~50px: TikTok action buttons (like, share, etc.)
-              We scale up the iframe and shift it to crop these areas.
+              AGGRESSIVE CROP: Scale iframe up 115% and center it.
+              This crops out ALL TikTok UI elements:
+              - Header bar (top ~55px)
+              - Username & description (bottom ~100px)  
+              - Like/share/comment buttons (right ~50px)
+              - Watermark overlay
+              Only the pure video content remains visible.
             */}
             <div
-              className="absolute"
               style={{
-                top: "-70px",
-                left: "-30px",
-                width: "calc(100% + 90px)",
-                height: "calc(100% + 190px)",
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                width: "115%",
+                height: "115%",
+                transform: "translate(-50%, -50%)",
                 overflow: "hidden",
               }}
             >
               <iframe
+                key={videoId}
                 id={iframeId}
-                src={`${embedUrl || `https://www.tiktok.com/embed/v2/${videoId}`}?autoplay=1&mute=0&sound=1`}
-                className="w-full h-full"
-                allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
-                allowFullScreen
-                title={title}
-                onLoad={() => setTiktokLoaded(true)}
+                src={`${embedUrl || `https://www.tiktok.com/embed/v2/${videoId}`}?autoplay=1&mute=0&sound=1&related=0&repeat=1`}
                 style={{
                   border: "none",
                   borderRadius: "0",
@@ -330,21 +332,21 @@ export default function VideoCard({
                   height: "100%",
                   pointerEvents: "auto",
                 }}
+                allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
+                allowFullScreen
+                title={title}
+                onLoad={() => setTiktokLoaded(true)}
                 referrerPolicy="no-referrer-when-downgrade"
               />
             </div>
 
-            {/* Black overlays to mask any remaining TikTok UI edges */}
-            {/* Top mask — covers TikTok header */}
-            <div className="absolute top-0 left-0 right-0 h-[6px] bg-black z-10 pointer-events-none" />
-            {/* Bottom mask — covers TikTok description/buttons */}
-            <div className="absolute bottom-0 left-0 right-0 h-[6px] bg-black z-10 pointer-events-none" />
-            {/* Right mask — covers TikTok sidebar buttons */}
-            <div className="absolute top-0 right-0 bottom-0 w-[6px] bg-black z-10 pointer-events-none" />
-            {/* Left mask */}
-            <div className="absolute top-0 left-0 bottom-0 w-[6px] bg-black z-10 pointer-events-none" />
+            {/* Thick black edge masks — guarantee no TikTok UI leaks */}
+            <div className="absolute top-0 left-0 right-0 h-2 bg-black z-10 pointer-events-none" />
+            <div className="absolute bottom-0 left-0 right-0 h-2 bg-black z-10 pointer-events-none" />
+            <div className="absolute top-0 right-0 bottom-0 w-2 bg-black z-10 pointer-events-none" />
+            <div className="absolute top-0 left-0 bottom-0 w-2 bg-black z-10 pointer-events-none" />
 
-            {/* TikTok loading overlay */}
+            {/* Loading overlay */}
             {!tiktokLoaded && (
               <div className="absolute inset-0 flex items-center justify-center bg-black z-20">
                 <div className="flex flex-col items-center gap-3">
@@ -354,6 +356,9 @@ export default function VideoCard({
               </div>
             )}
           </div>
+        ) : (
+          /* Inactive TikTok — render BLACK SCREEN only (no iframe = no audio leak) */
+          <div className="h-full w-full bg-black" />
         )}
       </div>
 
