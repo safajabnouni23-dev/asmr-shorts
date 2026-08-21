@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { searchASMRVideos, YouTubeVideo } from "@/lib/youtube";
 import { isASMRContent } from "@/lib/gemini";
 import { FALLBACK_VIDEOS } from "@/lib/fallback";
+import { TIKTOK_ASRM_VIDEOS } from "@/lib/tiktok-data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -17,20 +18,17 @@ export async function GET(req: NextRequest) {
 
   console.log("[/api/videos] deviceId:", deviceId?.slice(0, 8) + "...");
   console.log("[/api/videos] excludeIds count:", excludeIds.length);
-  console.log("[/api/videos] YOUTUBE_API_KEY present:", !!process.env.YOUTUBE_API_KEY);
 
   if (!deviceId) {
-    console.log("[/api/videos] ERROR: No deviceId");
     return NextResponse.json({ error: "deviceId required" }, { status: 400 });
   }
 
-  // Try to get user from database (non-blocking — if DB fails, use defaults)
+  // Detect user
   let userGender = "male";
   let maleRatio = 10;
-  let isNewVisitor = true; // Default: treat as new visitor for best content
+  let isNewVisitor = true;
 
   try {
-    console.log("[/api/videos] Attempting database connection...");
     const { db } = await import("@/db");
     const { users } = await import("@/db/schema");
     const { eq } = await import("drizzle-orm");
@@ -44,11 +42,9 @@ export async function GET(req: NextRequest) {
     if (userResult.length > 0) {
       userGender = userResult[0].gender;
       maleRatio = userResult[0].maleContentRatio;
-      isNewVisitor = false; // Returning visitor
-      console.log("[/api/videos] Returning user:", userGender, "ratio:", maleRatio);
+      isNewVisitor = false;
     } else {
-      console.log("[/api/videos] NEW VISITOR detected — serving premium content");
-      // Create user in background
+      console.log("[/api/videos] NEW VISITOR — premium content");
       try {
         await db.insert(users).values({
           deviceId,
@@ -57,22 +53,19 @@ export async function GET(req: NextRequest) {
           createdAt: new Date(),
           lastActiveAt: new Date(),
         });
-        console.log("[/api/videos] Created new user in DB");
-      } catch (createErr) {
-        console.log("[/api/videos] Could not create user:", (createErr as Error).message);
-      }
+      } catch {}
     }
   } catch (dbErr) {
-    console.log("[/api/videos] DATABASE ERROR:", (dbErr as Error).message);
-    console.log("[/api/videos] Continuing with new visitor defaults (premium content)");
+    console.log("[/api/videos] DB error:", (dbErr as Error).message);
   }
 
-  // Try YouTube API — new visitors get highest quality content
+  // === STEP 1: Try YouTube API ===
   let rawVideos: YouTubeVideo[] = [];
   let nextPageToken: string | null = null;
+  let youtubeSuccess = false;
 
   try {
-    console.log("[/api/videos] Searching YouTube... isNewVisitor:", isNewVisitor);
+    console.log("[/api/videos] Trying YouTube...");
     const result = await searchASMRVideos(
       userGender,
       maleRatio,
@@ -82,106 +75,118 @@ export async function GET(req: NextRequest) {
     );
     rawVideos = result.videos;
     nextPageToken = result.nextPageToken;
-    console.log("[/api/videos] YouTube returned:", rawVideos.length, "videos");
+    youtubeSuccess = rawVideos.length > 0;
+    console.log("[/api/videos] YouTube:", rawVideos.length, "videos");
   } catch (ytErr) {
-    console.log("[/api/videos] YOUTUBE ERROR:", (ytErr as Error).message);
+    console.log("[/api/videos] YouTube FAILED:", (ytErr as Error).message);
   }
 
-  // If YouTube returned nothing, use fallback
-  if (rawVideos.length === 0) {
-    console.log("[/api/videos] No YouTube videos — using FALLBACK data");
-    const fallbackFiltered = FALLBACK_VIDEOS.filter(
-      (v) => !excludeIds.includes(v.videoId)
-    );
-    return NextResponse.json({
-      videos: fallbackFiltered,
-      nextPageToken: null,
-      source: "fallback",
-      isNewVisitor,
+  // === STEP 2: Filter YouTube videos ===
+  let approvedVideos: YouTubeVideo[] = [];
+
+  if (youtubeSuccess) {
+    if (isNewVisitor) {
+      // Quick filter for new visitors
+      for (const video of rawVideos) {
+        const title = video.title.toLowerCase();
+        const desc = video.description.toLowerCase();
+        const hasAsmrKeywords =
+          title.includes("asmr") || desc.includes("asmr") ||
+          title.includes("whisper") || title.includes("tingles") ||
+          title.includes("triggers") || title.includes("relax") ||
+          title.includes("sleep");
+        if (hasAsmrKeywords) approvedVideos.push(video);
+      }
+    } else {
+      // Full Gemini filter for returning visitors
+      for (const video of rawVideos) {
+        let approved = true;
+        try {
+          approved = await isASMRContent(video.title, video.description);
+        } catch { approved = true; }
+        if (approved) approvedVideos.push(video);
+      }
+    }
+  }
+
+  console.log("[/api/videos] YouTube approved:", approvedVideos.length);
+
+  // === STEP 3: Smart Fallback — Mix TikTok if YouTube is weak ===
+  const MIN_VIDEOS = 8; // Minimum acceptable videos
+  const finalVideos: Array<{
+    videoId: string;
+    title: string;
+    description: string;
+    thumbnailUrl: string;
+    channelTitle: string;
+    viewCount: number;
+    source: "youtube" | "tiktok";
+    embedUrl?: string;
+  }> = [];
+
+  // Add approved YouTube videos
+  for (const v of approvedVideos) {
+    finalVideos.push({
+      videoId: v.videoId,
+      title: v.title,
+      description: v.description,
+      thumbnailUrl: v.thumbnailUrl,
+      channelTitle: v.channelTitle,
+      viewCount: v.viewCount,
+      source: "youtube",
     });
   }
 
-  // Filter through Gemini (skip for new visitors to speed up loading)
-  const approvedVideos: YouTubeVideo[] = [];
+  // If YouTube didn't return enough, add TikTok videos
+  if (finalVideos.length < MIN_VIDEOS) {
+    console.log("[/api/videos] YouTube weak (" + finalVideos.length + ") — adding TikTok fallback");
+    const tiktokFiltered = TIKTOK_ASRM_VIDEOS.filter(
+      (t) => !excludeIds.includes(t.videoId)
+    );
+    for (const t of tiktokFiltered) {
+      finalVideos.push({
+        videoId: t.videoId,
+        title: t.title,
+        description: "",
+        thumbnailUrl: "",
+        channelTitle: t.channelTitle,
+        viewCount: t.viewCount,
+        source: "tiktok",
+        embedUrl: t.embedUrl,
+      });
+    }
+  }
 
-  if (isNewVisitor) {
-    // For new visitors: skip Gemini filter for faster loading, trust YouTube results
-    // Only do a quick title-based filter
-    for (const video of rawVideos) {
-      const title = video.title.toLowerCase();
-      const desc = video.description.toLowerCase();
-      // Quick check: must have ASMR-related keywords
-      const hasAsmrKeywords =
-        title.includes("asmr") ||
-        desc.includes("asmr") ||
-        title.includes("whisper") ||
-        title.includes("tingles") ||
-        title.includes("triggers") ||
-        title.includes("relax") ||
-        title.includes("sleep");
-
-      if (hasAsmrKeywords) {
-        approvedVideos.push(video);
-      } else {
-        console.log("[/api/videos] Quick filter rejected:", video.title.slice(0, 40));
+  // If still no videos at all, use YouTube fallback + TikTok
+  if (finalVideos.length === 0) {
+    console.log("[/api/videos] Total fallback — YouTube fallback + TikTok");
+    for (const v of FALLBACK_VIDEOS) {
+      if (!excludeIds.includes(v.videoId)) {
+        finalVideos.push({ ...v, source: "youtube" });
       }
     }
-    console.log("[/api/videos] Quick filter approved:", approvedVideos.length, "videos for new visitor");
-  } else {
-    // Returning visitors: full Gemini filter
-    for (const video of rawVideos) {
-      let approved = true;
-      try {
-        approved = await isASMRContent(video.title, video.description);
-        console.log("[/api/videos] Gemini:", video.title.slice(0, 40), "→", approved ? "APPROVE" : "REJECT");
-      } catch (geminiErr) {
-        console.log("[/api/videos] GEMINI ERROR — approving by default");
-        approved = true;
-      }
-
-      // Cache in database (non-blocking)
-      try {
-        const { db } = await import("@/db");
-        const { videoCache } = await import("@/db/schema");
-        await db.insert(videoCache).values({
-          videoId: video.videoId,
-          title: video.title,
-          description: video.description,
-          thumbnailUrl: video.thumbnailUrl,
-          channelTitle: video.channelTitle,
-          viewCount: video.viewCount,
-          approved,
+    for (const t of TIKTOK_ASRM_VIDEOS) {
+      if (!excludeIds.includes(t.videoId)) {
+        finalVideos.push({
+          videoId: t.videoId,
+          title: t.title,
+          description: "",
+          thumbnailUrl: "",
+          channelTitle: t.channelTitle,
+          viewCount: t.viewCount,
+          source: "tiktok",
+          embedUrl: t.embedUrl,
         });
-      } catch {
-        // Ignore cache errors
-      }
-
-      if (approved) {
-        approvedVideos.push(video);
       }
     }
   }
 
-  console.log("[/api/videos] Final approved count:", approvedVideos.length);
-
-  // If all videos were rejected, use fallback
-  if (approvedVideos.length === 0) {
-    console.log("[/api/videos] All videos rejected — using FALLBACK data");
-    const fallbackFiltered = FALLBACK_VIDEOS.filter(
-      (v) => !excludeIds.includes(v.videoId)
-    );
-    return NextResponse.json({
-      videos: fallbackFiltered,
-      nextPageToken: null,
-      source: "fallback",
-      isNewVisitor,
-    });
-  }
+  console.log("[/api/videos] Final mix:", finalVideos.length, "videos | YouTube:", finalVideos.filter(v => v.source === "youtube").length, "| TikTok:", finalVideos.filter(v => v.source === "tiktok").length);
 
   return NextResponse.json({
-    videos: approvedVideos,
-    nextPageToken,
-    source: "youtube",
+    videos: finalVideos,
+    nextPageToken: youtubeSuccess ? nextPageToken : null,
+    source: youtubeSuccess ? "youtube" : "hybrid",
     isNewVisitor,
   });
 }

@@ -26,6 +26,8 @@ interface VideoData {
   thumbnailUrl: string;
   channelTitle: string;
   viewCount: number;
+  source: "youtube" | "tiktok";
+  embedUrl?: string;
 }
 
 interface ToastState {
@@ -484,6 +486,8 @@ export default function Home() {
                 viewCount={video.viewCount}
                 isLiked={likedIds.has(video.videoId)}
                 soundUnlocked={soundEnabled}
+                source={video.source || "youtube"}
+                embedUrl={video.embedUrl}
                 onLike={handleLike}
                 onUnlike={handleUnlike}
                 onAdClick={handleAdClick}
