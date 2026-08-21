@@ -12,73 +12,96 @@ export interface YouTubeVideo {
   viewCount: number;
 }
 
-// Search queries optimized for ASMR content
-const MALE_TARGET_QUERIES = [
-  "Female ASMR",
-  "Girl ASMR triggers",
-  "Beautiful Girl ASMR",
-  "ASMR female whispering",
-  "ASMR girl tapping",
-  "ASMR woman soft spoken",
-  "ASMR female roleplay",
-  "ASMR girl ear cleaning",
-  "ASMR female massage",
-  "ASMR woman tingles",
+// ============================================
+// SEARCH QUERIES — 90%+ Female ASMR Creators
+// Optimized for high engagement & soothing voices
+// ============================================
+
+// Primary queries — female creators with high engagement (used 90% of the time)
+const FEMALE_HIGH_ENGAGEMENT_QUERIES = [
+  "ASMR female soothing voice",
+  "ASMR girl relaxing triggers",
+  "ASMR makeup roleplay female",
+  "ASMR beautiful girl whispering",
+  "ASMR woman soft spoken sleep",
+  "ASMR female tapping nails",
+  "ASMR girl ear cleaning relaxing",
+  "ASMR woman gentle whispers",
+  "ASMR female hair brushing",
+  "ASMR girl personal attention",
+  "ASMR female massage roleplay",
+  "ASMR woman tingles sleep",
+  "ASMR girl close whispers",
+  "ASMR female skincare roleplay",
+  "ASMR woman relaxing sounds",
+  "ASMR female mouth sounds",
+  "ASMR girl cranial nerve exam",
+  "ASMR woman face brushing",
+  "ASMR female spa roleplay",
+  "ASMR girl sleep triggers",
 ];
 
-const FEMALE_TARGET_QUERIES = [
-  "Male ASMR",
-  "ASMR male whispering",
-  "ASMR man soft spoken",
-  "ASMR male roleplay",
-  "ASMR man tapping",
-  "ASMR male triggers",
-  "ASMR deep voice male",
-  "ASMR man ear cleaning",
+// Secondary queries — general high-quality ASMR (used 10% of the time)
+const GENERAL_HIGH_QUALITY_QUERIES = [
+  "ASMR best triggers 2025",
+  "ASMR most popular sleep",
+  "ASMR viral tingles",
+  "ASMR satisfying sounds",
 ];
 
-const GENERAL_QUERIES = [
-  "ASMR",
-  "ASMR triggers",
-  "ASMR tingles",
-  "ASMR sleep",
-  "ASMR relaxation",
-  "ASMR tapping",
-  "ASMR whispering",
-  "ASMR sounds",
+// New visitor queries — guaranteed high view count content
+const NEW_VISITOR_QUERIES = [
+  "ASMR female most viewed",
+  "ASMR girl viral shorts",
+  "ASMR woman millions views",
+  "ASMR popular female creator",
 ];
 
 export async function searchASMRVideos(
   gender: string,
   maleRatio: number,
   pageToken?: string,
-  excludeIds: string[] = []
+  excludeIds: string[] = [],
+  isNewVisitor: boolean = false
 ): Promise<{ videos: YouTubeVideo[]; nextPageToken: string | null }> {
-  // Determine which query set to use based on user gender and adaptive ratio
+  // Select query pool based on visitor status and gender
   let queries: string[];
-  if (gender === "male") {
-    const femaleWeight = Math.max(10, 90 - maleRatio);
+
+  if (isNewVisitor) {
+    // New visitor: show highest engagement female content
+    queries = NEW_VISITOR_QUERIES;
+  } else if (gender === "male") {
+    // Male user: 90% female creators, 10% general (adjusted by adaptive ratio)
+    const femaleWeight = Math.max(85, 95 - maleRatio);
     if (Math.random() * 100 < femaleWeight) {
-      queries = MALE_TARGET_QUERIES;
+      queries = FEMALE_HIGH_ENGAGEMENT_QUERIES;
     } else {
-      queries = GENERAL_QUERIES;
+      queries = GENERAL_HIGH_QUALITY_QUERIES;
     }
   } else if (gender === "female") {
-    queries = FEMALE_TARGET_QUERIES;
+    // Female user: still 90% female creators (most popular ASMR content)
+    if (Math.random() < 0.9) {
+      queries = FEMALE_HIGH_ENGAGEMENT_QUERIES;
+    } else {
+      queries = GENERAL_HIGH_QUALITY_QUERIES;
+    }
   } else {
-    queries = GENERAL_QUERIES;
+    // Unknown gender: default to female creators for maximum engagement
+    queries = FEMALE_HIGH_ENGAGEMENT_QUERIES;
   }
 
-  // Pick a random query from the selected set
+  // Pick a random query from the selected pool
   const query = queries[Math.floor(Math.random() * queries.length)];
+
+  console.log("[YouTube] Searching:", query, "| isNewVisitor:", isNewVisitor);
 
   const params = new URLSearchParams({
     part: "snippet",
     q: query,
     type: "video",
     videoDuration: "short",
-    maxResults: "12",
-    order: "viewCount",
+    maxResults: "15",
+    order: "viewCount", // Always sort by highest views for engagement
     key: YOUTUBE_API_KEY,
     relevanceLanguage: "en",
   });
@@ -149,7 +172,17 @@ export async function searchASMRVideos(
   const videos: YouTubeVideo[] = (videoData.items || [])
     .filter((item: any) => {
       const vid = item.id;
-      return vid && !excludeIds.includes(vid);
+      if (!vid || excludeIds.includes(vid)) return false;
+
+      // For new visitors: filter for minimum view count to ensure quality
+      const stats = item.statistics || {};
+      const viewCount = parseInt(stats.viewCount || "0", 10);
+      if (isNewVisitor && viewCount < 50000) {
+        console.log("[YouTube] Filtered low views for new visitor:", vid, viewCount);
+        return false;
+      }
+
+      return true;
     })
     .map((item: any) => {
       const snippet = item.snippet || {};
@@ -167,6 +200,11 @@ export async function searchASMRVideos(
         viewCount: parseInt(stats.viewCount || "0", 10),
       };
     });
+
+  // Sort by view count descending for maximum engagement
+  videos.sort((a, b) => b.viewCount - a.viewCount);
+
+  console.log("[YouTube] Found", videos.length, "videos | Top views:", videos[0]?.viewCount || 0);
 
   return { videos, nextPageToken };
 }
