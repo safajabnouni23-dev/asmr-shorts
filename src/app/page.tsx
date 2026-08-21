@@ -28,6 +28,7 @@ interface VideoData {
   viewCount: number;
   source: "youtube" | "dailymotion";
   embedUrl?: string;
+  duration?: number;
 }
 
 interface ToastState {
@@ -357,6 +358,23 @@ export default function Home() {
     }
   }, []);
 
+  // === Auto-skip handler (Dailymotion clip ended or error) ===
+  const handleAutoSkip = useCallback(() => {
+    const feed = feedRef.current;
+    if (!feed) return;
+    const currentIdx = activeIndex;
+    if (currentIdx < videos.length - 1) {
+      // Navigate to next video
+      const targetEl = feed.querySelector(`[data-video-index="${currentIdx + 1}"]`);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: "smooth" });
+      }
+    } else if (hasMoreRef.current && !fetchInProgressRef.current) {
+      // At last video — fetch more then skip
+      fetchVideos();
+    }
+  }, [activeIndex, videos.length, fetchVideos]);
+
   // === Navigation handlers ===
   const handleNavigateUp = useCallback(() => {
     const feed = feedRef.current;
@@ -494,6 +512,7 @@ export default function Home() {
                 soundUnlocked={soundEnabled}
                 source={video.source || "youtube"}
                 embedUrl={video.embedUrl}
+                duration={video.duration}
                 onLike={handleLike}
                 onUnlike={handleUnlike}
                 onAdClick={handleAdClick}
@@ -502,6 +521,7 @@ export default function Home() {
                 onUnlockSound={activateSound}
                 onNavigateUp={handleNavigateUp}
                 onNavigateDown={handleNavigateDown}
+                onAutoSkip={handleAutoSkip}
                 isFirst={index === 0}
                 isLast={index === videos.length - 1}
               />

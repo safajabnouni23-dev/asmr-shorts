@@ -41,6 +41,7 @@ interface VideoCardProps {
   soundUnlocked: boolean;
   source: "youtube" | "dailymotion";
   embedUrl?: string;
+  duration?: number; // Dailymotion total duration in seconds
   onLike: (videoId: string) => void;
   onUnlike: (videoId: string) => void;
   onAdClick: () => void;
@@ -49,6 +50,7 @@ interface VideoCardProps {
   onUnlockSound: () => void;
   onNavigateUp: () => void;
   onNavigateDown: () => void;
+  onAutoSkip: () => void; // Called when Dailymotion clip ends
   isFirst: boolean;
   isLast: boolean;
 }
@@ -62,6 +64,7 @@ export default function VideoCard({
   soundUnlocked,
   source,
   embedUrl,
+  duration,
   onLike,
   onUnlike,
   onAdClick,
@@ -70,6 +73,7 @@ export default function VideoCard({
   onUnlockSound,
   onNavigateUp,
   onNavigateDown,
+  onAutoSkip,
   isFirst,
   isLast,
 }: VideoCardProps) {
@@ -81,8 +85,54 @@ export default function VideoCard({
   const [playerReady, setPlayerReady] = useState(false);
   const [enhancerActive, setEnhancerActive] = useState(false);
   const [dmLoaded, setDmLoaded] = useState(false);
+  const [dmError, setDmError] = useState(false);
   const lastTapRef = useRef(0);
   const initializedRef = useRef(false);
+  const autoSkipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // === Dailymotion Random Snippet Extraction ===
+  const dmSnippetRef = useRef<{ startTime: number; clipDuration: number } | null>(null);
+
+  // Generate random snippet when Dailymotion video becomes active
+  useEffect(() => {
+    if (source !== "dailymotion" || !isActive) return;
+
+    // Clean up previous timers
+    if (autoSkipTimerRef.current) clearTimeout(autoSkipTimerRef.current);
+    if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+    setDmError(false);
+    setDmLoaded(false);
+
+    // Generate random snippet from long video
+    const totalDuration = duration || 300; // Default 5 min if unknown
+    const clipDuration = 30 + Math.floor(Math.random() * 21); // 30-50 seconds
+    const maxStart = Math.max(0, totalDuration - clipDuration - 10);
+    const startTime = Math.floor(Math.random() * maxStart);
+
+    dmSnippetRef.current = { startTime, clipDuration };
+    console.log(`[DM Snippet] ${videoId}: start=${startTime}s, duration=${clipDuration}s (total: ${totalDuration}s)`);
+
+    // Error fallback: if iframe doesn't load within 3 seconds, skip
+    loadTimeoutRef.current = setTimeout(() => {
+      if (!dmLoaded) {
+        console.log(`[DM Error] ${videoId} failed to load in 3s — auto-skipping`);
+        setDmError(true);
+        onAutoSkip();
+      }
+    }, 3000);
+
+    // Auto-skip: when clip duration expires, go to next video
+    autoSkipTimerRef.current = setTimeout(() => {
+      console.log(`[DM AutoSkip] ${videoId} clip ended after ${clipDuration}s`);
+      onAutoSkip();
+    }, clipDuration * 1000);
+
+    return () => {
+      if (autoSkipTimerRef.current) clearTimeout(autoSkipTimerRef.current);
+      if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+    };
+  }, [videoId, source, isActive, duration, onAutoSkip]);
 
   // Track watched when active
   useEffect(() => {
@@ -298,26 +348,41 @@ export default function VideoCard({
           /* YouTube Player */
           <div id={iframeId} className="h-full w-full" />
         ) : isActive ? (
-          /* Dailymotion Player — ONLY rendered when active (prevents audio leak) */
+          /* Dailymotion Player — Random snippet from long video */
           <div className="h-full w-full relative overflow-hidden bg-black">
-            <iframe
-              key={videoId}
-              id={iframeId}
-              src={`${embedUrl || `https://www.dailymotion.com/embed/video/${videoId}`}?autoplay=1&mute=0&ui-start-screen-info=false&ui-logo=false&sharing-enable=false&endscreen-enable=false&queue-enable=false`}
-              style={{
-                border: "none",
-                borderRadius: "0",
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                pointerEvents: "auto",
-              }}
-              allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
-              allowFullScreen
-              title={title}
-              onLoad={() => setDmLoaded(true)}
-              referrerPolicy="no-referrer-when-downgrade"
-            />
+            {!dmError ? (
+              <iframe
+                key={`${videoId}-${dmSnippetRef.current?.startTime || 0}`}
+                id={iframeId}
+                src={`${embedUrl || `https://www.dailymotion.com/embed/video/${videoId}`}?start=${dmSnippetRef.current?.startTime || 0}&autoplay=1&mute=0&ui-start-screen-info=false&ui-logo=false&sharing-enable=false&endscreen-enable=false&queue-enable=false&controls=false`}
+                style={{
+                  border: "none",
+                  borderRadius: "0",
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  pointerEvents: "auto",
+                }}
+                allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
+                allowFullScreen
+                title={title}
+                onLoad={() => {
+                  setDmLoaded(true);
+                  if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+                }}
+                onError={() => {
+                  console.log(`[DM Error] iframe error for ${videoId}`);
+                  setDmError(true);
+                  onAutoSkip();
+                }}
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            ) : (
+              /* Error state — black screen, auto-skip triggered */
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
+                <span className="text-white/30 text-xs">Loading next...</span>
+              </div>
+            )}
             {/* Loading overlay */}
             {!dmLoaded && (
               <div className="absolute inset-0 flex items-center justify-center bg-black z-20">

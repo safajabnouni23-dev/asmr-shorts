@@ -1,6 +1,6 @@
-// Dailymotion Public API — ASMR Shorts (< 60 seconds)
+// Dailymotion Public API — ASMR videos (any length, high quality)
+// Strategy: Fetch long-form ASMR, then extract random 30-50s snippets
 // No API key required for public endpoints
-// Docs: https://developer.dailymotion.com/api/
 
 const DM_API_BASE = "https://api.dailymotion.com";
 
@@ -10,26 +10,30 @@ export interface DailymotionVideo {
   title: string;
   channelTitle: string;
   viewCount: number;
+  duration: number; // Total duration in seconds
   source: "dailymotion";
 }
 
-// Search queries optimized for ASMR short-form content
+// Search queries for high-quality ASMR content (long-form preferred)
 const DM_SEARCH_QUERIES = [
-  "ASMR",
-  "ASMR sleep",
-  "ASMR whispering",
-  "ASMR tapping",
-  "ASMR triggers",
-  "ASMR relaxation",
-  "ASMR tingles",
-  "ASMR soft spoken",
-  "ASMR roleplay",
-  "ASMR sounds",
-  "ASMR massage",
-  "ASMR hair brushing",
-  "ASMR ear cleaning",
-  "ASMR mouth sounds",
-  "ASMR relaxing",
+  "ASMR Relaxing",
+  "ASMR sleep long",
+  "ASMR whispering full",
+  "ASMR tapping compilation",
+  "ASMR triggers extended",
+  "ASMR relaxation deep",
+  "ASMR tingles long form",
+  "ASMR soft spoken full video",
+  "ASMR roleplay full",
+  "ASMR sounds compilation",
+  "ASMR massage full session",
+  "ASMR hair brushing long",
+  "ASMR ear cleaning full",
+  "ASMR mouth sounds extended",
+  "ASMR relaxing long video",
+  "ASMR sleep aid hours",
+  "ASMR no talking long",
+  "ASMR scratching compilation",
 ];
 
 export async function searchDailymotionASMR(
@@ -41,11 +45,9 @@ export async function searchDailymotionASMR(
   const params = new URLSearchParams({
     fields: "id,title,embed_url,channel.name,views_total,duration,thumbnail_720_url",
     search: query,
-    longer_than: "0",
-    shorter_than: "60", // CRITICAL: Only shorts under 60 seconds
     limit: "20",
     page: String(page),
-    sort: "visited", // Sort by most viewed for engagement
+    sort: "visited", // Most viewed = higher quality
     family_filter: "false",
   });
 
@@ -69,25 +71,26 @@ export async function searchDailymotionASMR(
 
     const videos: DailymotionVideo[] = items
       .filter((item: any) => {
-        // Filter out excluded IDs
         if (excludeIds.includes(item.id)) return false;
-        // Must have embed URL
         if (!item.embed_url) return false;
-        // Duration must be under 60 seconds (double-check)
-        if (item.duration && item.duration > 60) return false;
+        // Must have duration and be at least 60 seconds (long-form)
+        if (!item.duration || item.duration < 60) return false;
         return true;
       })
       .map((item: any) => ({
         videoId: item.id,
         embedUrl: item.embed_url,
-        title: item.title || "ASMR Short",
+        title: item.title || "ASMR Video",
         channelTitle: item["channel.name"] || item.channel?.name || "Dailymotion",
-        viewCount: item.views_total || item["views_total"] || 0,
+        viewCount: item.views_total || 0,
+        duration: item.duration || 0, // Duration in seconds
         source: "dailymotion" as const,
       }));
 
     // Sort by view count descending
     videos.sort((a, b) => b.viewCount - a.viewCount);
+
+    console.log("[Dailymotion] Filtered:", videos.length, "long-form videos");
 
     return {
       videos,
@@ -99,7 +102,25 @@ export async function searchDailymotionASMR(
   }
 }
 
-// Get Dailymotion embed URL for a video ID
-export function getDailymotionEmbedUrl(videoId: string): string {
-  return `https://www.dailymotion.com/embed/video/${videoId}?autoplay=1&mute=0&ui-start-screen-info=false&ui-logo=false&sharing-enable=false&endscreen-enable=false`;
+// Generate random snippet from a long video
+export function getRandomSnippet(duration: number): {
+  startTime: number;
+  clipDuration: number;
+} {
+  // Clip duration: random between 30-50 seconds
+  const clipDuration = 30 + Math.floor(Math.random() * 21); // 30-50
+
+  // Start time: random, but leave at least clipDuration seconds remaining
+  const maxStart = Math.max(0, duration - clipDuration - 10);
+  const startTime = Math.floor(Math.random() * maxStart);
+
+  return { startTime, clipDuration };
+}
+
+// Build Dailymotion embed URL with start time
+export function getDailymotionEmbedUrl(
+  videoId: string,
+  startTime: number = 0
+): string {
+  return `https://www.dailymotion.com/embed/video/${videoId}?start=${startTime}&autoplay=1&mute=0&ui-start-screen-info=false&ui-logo=false&sharing-enable=false&endscreen-enable=false&queue-enable=false&controls=false`;
 }

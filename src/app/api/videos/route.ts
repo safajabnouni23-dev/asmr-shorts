@@ -107,6 +107,7 @@ export async function GET(req: NextRequest) {
     channelTitle: string;
     viewCount: number;
     source: "dailymotion";
+    duration?: number;
   }> = [];
   let dmNextPage: number | null = null;
   if (dmResult.status === "fulfilled") {
@@ -150,6 +151,7 @@ export async function GET(req: NextRequest) {
     viewCount: number;
     source: "youtube" | "dailymotion";
     embedUrl?: string;
+    duration?: number;
   }> = [];
 
   // Add YouTube videos
@@ -176,6 +178,7 @@ export async function GET(req: NextRequest) {
       viewCount: d.viewCount,
       source: "dailymotion",
       embedUrl: d.embedUrl || getDailymotionEmbedUrl(d.videoId),
+      duration: d.duration,
     });
   }
 
