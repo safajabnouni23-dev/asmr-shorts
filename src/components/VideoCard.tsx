@@ -2,6 +2,10 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import { formatViews } from "@/lib/utils";
+import {
+  toggleASMREnhancer,
+  isASMREnhancerActive,
+} from "@/lib/asmr-enhancer";
 
 // Load YouTube IFrame API once
 let ytApiReady = false;
@@ -21,7 +25,6 @@ function loadYouTubeAPI(callback: () => void) {
   tag.src = "https://www.youtube.com/iframe_api";
   document.head.appendChild(tag);
 
-  // YouTube calls this when ready
   (window as any).onYouTubeIframeAPIReady = () => {
     ytApiReady = true;
     ytApiCallbacks.forEach((cb) => cb());
@@ -64,6 +67,7 @@ export default function VideoCard({
   const [showInfo, setShowInfo] = useState(true);
   const [doubleTapHeart, setDoubleTapHeart] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  const [enhancerActive, setEnhancerActive] = useState(false);
   const lastTapRef = useRef(0);
   const initializedRef = useRef(false);
 
@@ -73,6 +77,11 @@ export default function VideoCard({
       onWatched(videoId);
     }
   }, [isActive, videoId, onWatched]);
+
+  // Sync enhancer state
+  useEffect(() => {
+    setEnhancerActive(isASMREnhancerActive());
+  }, [isActive]);
 
   // Initialize YouTube Player
   useEffect(() => {
@@ -87,7 +96,7 @@ export default function VideoCard({
           videoId,
           playerVars: {
             autoplay: isActive ? 1 : 0,
-            mute: 1, // Always start muted for autoplay policy
+            mute: 1,
             loop: 1,
             playlist: videoId,
             playsinline: 1,
@@ -102,7 +111,6 @@ export default function VideoCard({
           events: {
             onReady: () => {
               setPlayerReady(true);
-              // If sound is already unlocked, unmute immediately
               if (soundUnlocked && isActive) {
                 player.unMute();
                 player.setVolume(100);
@@ -110,7 +118,6 @@ export default function VideoCard({
               }
             },
             onStateChange: (event: any) => {
-              // Auto-replay when video ends
               if (event.data === (window as any).YT.PlayerState.ENDED) {
                 player.playVideo();
               }
@@ -149,7 +156,7 @@ export default function VideoCard({
     }
   }, [isActive, playerReady]);
 
-  // Handle sound unlock — DIRECT API call, not just state
+  // Handle sound unlock
   useEffect(() => {
     if (!playerRef.current || !playerReady || !soundUnlocked) return;
     try {
@@ -167,7 +174,6 @@ export default function VideoCard({
   const handleContainerClick = useCallback(() => {
     if (!soundUnlocked) {
       onUnlockSound();
-      // Direct unmute via YouTube API
       if (playerRef.current && playerReady) {
         try {
           playerRef.current.unMute();
@@ -179,6 +185,31 @@ export default function VideoCard({
       }
     }
   }, [soundUnlocked, onUnlockSound, playerReady]);
+
+  // ASMR Enhancer toggle
+  const handleToggleEnhancer = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+
+      const nowActive = toggleASMREnhancer(() => {
+        // Boost YouTube volume when enhancer is on
+        if (playerRef.current && playerReady) {
+          try {
+            playerRef.current.setVolume(100);
+          } catch {}
+        }
+      });
+
+      setEnhancerActive(nowActive);
+
+      if (nowActive) {
+        console.log("[ASMR Enhancer] ✨ Activated — theta waves + pink noise");
+      } else {
+        console.log("[ASMR Enhancer] Deactivated");
+      }
+    },
+    [playerReady]
+  );
 
   const handleDoubleTap = useCallback(() => {
     const now = Date.now();
@@ -211,6 +242,15 @@ export default function VideoCard({
 
   return (
     <div className="relative h-screen w-full snap-start flex-shrink-0 bg-black overflow-hidden">
+      {/* ASMR Enhancer glow border effect */}
+      {enhancerActive && isActive && (
+        <div className="absolute inset-0 z-10 pointer-events-none">
+          <div className="absolute inset-0 rounded-none border-[3px] border-purple-500/30 animate-pulse" />
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
+        </div>
+      )}
+
       {/* YouTube Player Container */}
       <div
         ref={containerRef}
@@ -223,7 +263,7 @@ export default function VideoCard({
         <div id={iframeId} className="h-full w-full" />
       </div>
 
-      {/* Sound unlock overlay — covers entire screen until first click */}
+      {/* Sound unlock overlay */}
       {!soundUnlocked && isActive && (
         <div
           className="absolute inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-[1px] cursor-pointer"
@@ -271,6 +311,15 @@ export default function VideoCard({
           <span className="text-white font-semibold text-sm truncate max-w-[200px]">
             {channelTitle}
           </span>
+          {/* ASMR Enhancer badge */}
+          {enhancerActive && (
+            <div className="flex items-center gap-1 rounded-full bg-purple-500/30 border border-purple-400/40 px-2 py-0.5">
+              <span className="text-[10px]">✨</span>
+              <span className="text-[10px] text-purple-200 font-bold">
+                ASMR Boost
+              </span>
+            </div>
+          )}
         </div>
         <p className="text-white/90 text-sm leading-relaxed line-clamp-2 max-w-[280px]">
           {title}
@@ -306,6 +355,31 @@ export default function VideoCard({
             </span>
           </div>
           <span className="text-[10px] text-white/70 font-medium">إعجاب</span>
+        </button>
+
+        {/* ASMR Sound Enhancer button */}
+        <button
+          onClick={handleToggleEnhancer}
+          className="flex flex-col items-center gap-1 transition-transform active:scale-125"
+        >
+          <div
+            className={`flex h-12 w-12 items-center justify-center rounded-full backdrop-blur-md transition-all duration-500 ${
+              enhancerActive
+                ? "bg-gradient-to-br from-purple-500 to-indigo-600 shadow-lg shadow-purple-500/50 animate-pulse-glow"
+                : "bg-white/10 hover:bg-purple-500/20"
+            }`}
+          >
+            <span className={`text-xl transition-transform ${enhancerActive ? "animate-bounce" : ""}`}>
+              ✨
+            </span>
+          </div>
+          <span
+            className={`text-[10px] font-bold transition-colors ${
+              enhancerActive ? "text-purple-300" : "text-white/70"
+            }`}
+          >
+            {enhancerActive ? "مفعّل ✨" : "تحسين الصوت"}
+          </span>
         </button>
 
         {/* Ad / Unlock button */}
