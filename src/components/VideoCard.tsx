@@ -302,11 +302,12 @@ export default function VideoCard({
               id={iframeId}
               src={embedUrl || `https://www.tiktok.com/embed/v2/${videoId}`}
               className="h-full w-full"
-              allow="encrypted-media"
+              allow="autoplay; encrypted-media;"
               allowFullScreen
               title={title}
               onLoad={() => setTiktokLoaded(true)}
               style={{ border: "none", borderRadius: "0" }}
+              referrerPolicy="no-referrer-when-downgrade"
             />
             {/* TikTok loading overlay */}
             {!tiktokLoaded && (
