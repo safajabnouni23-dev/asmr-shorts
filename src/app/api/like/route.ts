@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
-import { users, likedVideos } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
 
 export const dynamic = "force-dynamic";
 
@@ -23,81 +20,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (action === "like") {
-      // Add like
-      try {
-        await db.insert(likedVideos).values({
-          deviceId,
-          videoId,
-          videoTitle: videoTitle || "",
-          creatorGender: creatorGender || "unknown",
-        });
-      } catch {
-        // Ignore duplicates
-      }
+    try {
+      const { db } = await import("@/db");
+      const { users, likedVideos } = await import("@/db/schema");
+      const { eq, and, sql } = await import("drizzle-orm");
 
-      // Adaptive learning: if male user likes male creator content, increase ratio
-      const userResult = await db
-        .select()
-        .from(users)
-        .where(eq(users.deviceId, deviceId))
-        .limit(1);
-
-      if (userResult.length > 0 && userResult[0].gender === "male") {
-        // Count male creator likes
-        const maleLikes = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(likedVideos)
-          .where(
-            and(
-              eq(likedVideos.deviceId, deviceId),
-              eq(likedVideos.creatorGender, "male")
-            )
-          );
-
-        const totalLikes = await db
-          .select({ count: sql<number>`count(*)` })
-          .from(likedVideos)
-          .where(eq(likedVideos.deviceId, deviceId));
-
-        const maleCount = Number(maleLikes[0]?.count || 0);
-        const totalCount = Number(totalLikes[0]?.count || 0);
-
-        if (totalCount > 0) {
-          const newRatio = Math.min(
-            50,
-            Math.round((maleCount / totalCount) * 100)
-          );
-          await db
-            .update(users)
-            .set({ maleContentRatio: newRatio })
-            .where(eq(users.deviceId, deviceId));
+      if (action === "like") {
+        try {
+          await db.insert(likedVideos).values({
+            deviceId,
+            videoId,
+            videoTitle: videoTitle || "",
+            creatorGender: creatorGender || "unknown",
+          });
+        } catch {
+          // Ignore duplicates
         }
+        return NextResponse.json({ success: true, action: "liked" });
       }
 
-      return NextResponse.json({ success: true, action: "liked" });
+      if (action === "unlike") {
+        await db
+          .delete(likedVideos)
+          .where(and(eq(likedVideos.deviceId, deviceId), eq(likedVideos.videoId, videoId)));
+        return NextResponse.json({ success: true, action: "unliked" });
+      }
+
+      return NextResponse.json({ error: "Invalid action" }, { status: 400 });
+    } catch (dbErr) {
+      console.log("[/api/like] DB error:", (dbErr as Error).message);
+      // Return success anyway — client tracks likes locally too
+      return NextResponse.json({ success: true, action, dbFallback: true });
     }
-
-    if (action === "unlike") {
-      await db
-        .delete(likedVideos)
-        .where(
-          and(
-            eq(likedVideos.deviceId, deviceId),
-            eq(likedVideos.videoId, videoId)
-          )
-        );
-
-      return NextResponse.json({ success: true, action: "unliked" });
-    }
-
-    return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (err) {
-    console.error("Like API error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    console.error("[/api/like] Error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -108,18 +65,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "deviceId required" }, { status: 400 });
     }
 
-    const likes = await db
-      .select({ videoId: likedVideos.videoId })
-      .from(likedVideos)
-      .where(eq(likedVideos.deviceId, deviceId));
+    try {
+      const { db } = await import("@/db");
+      const { likedVideos } = await import("@/db/schema");
+      const { eq } = await import("drizzle-orm");
 
-    const likedVideoIds = likes.map((l: { videoId: string }) => l.videoId);
-    return NextResponse.json({ likedVideoIds });
+      const likes = await db
+        .select({ videoId: likedVideos.videoId })
+        .from(likedVideos)
+        .where(eq(likedVideos.deviceId, deviceId));
+
+      const likedVideoIds = likes.map((l: { videoId: string }) => l.videoId);
+      return NextResponse.json({ likedVideoIds });
+    } catch (dbErr) {
+      console.log("[/api/like] DB error:", (dbErr as Error).message);
+      return NextResponse.json({ likedVideoIds: [] });
+    }
   } catch (err) {
-    console.error("Get likes error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    console.error("[/api/like] Error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
