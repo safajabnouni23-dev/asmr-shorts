@@ -45,6 +45,10 @@ interface VideoCardProps {
   onWatched: (videoId: string) => void;
   isActive: boolean;
   onUnlockSound: () => void;
+  onNavigateUp: () => void;
+  onNavigateDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
 }
 
 export default function VideoCard({
@@ -60,6 +64,10 @@ export default function VideoCard({
   onWatched,
   isActive,
   onUnlockSound,
+  onNavigateUp,
+  onNavigateDown,
+  isFirst,
+  isLast,
 }: VideoCardProps) {
   const playerRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -190,23 +198,14 @@ export default function VideoCard({
   const handleToggleEnhancer = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-
       const nowActive = toggleASMREnhancer(() => {
-        // Boost YouTube volume when enhancer is on
         if (playerRef.current && playerReady) {
           try {
             playerRef.current.setVolume(100);
           } catch {}
         }
       });
-
       setEnhancerActive(nowActive);
-
-      if (nowActive) {
-        console.log("[ASMR Enhancer] ✨ Activated — theta waves + pink noise");
-      } else {
-        console.log("[ASMR Enhancer] Deactivated");
-      }
     },
     [playerReady]
   );
@@ -242,10 +241,58 @@ export default function VideoCard({
 
   return (
     <div className="relative h-screen w-full snap-start flex-shrink-0 bg-black overflow-hidden">
+      {/* === GOLDEN ORNAMENTAL FRAME === */}
+      {/* Outer gold border */}
+      <div className="absolute inset-0 z-30 pointer-events-none">
+        {/* Top edge */}
+        <div className="absolute top-0 left-0 right-0 h-[6px] bg-gradient-to-r from-amber-700 via-yellow-400 to-amber-700 shadow-lg" />
+        {/* Bottom edge */}
+        <div className="absolute bottom-0 left-0 right-0 h-[6px] bg-gradient-to-r from-amber-700 via-yellow-400 to-amber-700 shadow-lg" />
+        {/* Left edge */}
+        <div className="absolute top-0 bottom-0 left-0 w-[6px] bg-gradient-to-b from-amber-700 via-yellow-400 to-amber-700 shadow-lg" />
+        {/* Right edge */}
+        <div className="absolute top-0 bottom-0 right-0 w-[6px] bg-gradient-to-b from-amber-700 via-yellow-400 to-amber-700 shadow-lg" />
+
+        {/* Corner ornaments — top-left */}
+        <div className="absolute top-0 left-0 w-10 h-10">
+          <div className="absolute top-0 left-0 w-8 h-8 border-t-[3px] border-l-[3px] border-amber-400 rounded-tl-lg" />
+          <div className="absolute top-1 left-1 w-5 h-5 border-t-[2px] border-l-[2px] border-yellow-300/60 rounded-tl-md" />
+          <span className="absolute top-0.5 left-1 text-[10px] text-amber-300/80">✦</span>
+        </div>
+
+        {/* Corner ornaments — top-right */}
+        <div className="absolute top-0 right-0 w-10 h-10">
+          <div className="absolute top-0 right-0 w-8 h-8 border-t-[3px] border-r-[3px] border-amber-400 rounded-tr-lg" />
+          <div className="absolute top-1 right-1 w-5 h-5 border-t-[2px] border-r-[2px] border-yellow-300/60 rounded-tr-md" />
+          <span className="absolute top-0.5 right-1 text-[10px] text-amber-300/80">✦</span>
+        </div>
+
+        {/* Corner ornaments — bottom-left */}
+        <div className="absolute bottom-0 left-0 w-10 h-10">
+          <div className="absolute bottom-0 left-0 w-8 h-8 border-b-[3px] border-l-[3px] border-amber-400 rounded-bl-lg" />
+          <div className="absolute bottom-1 left-1 w-5 h-5 border-b-[2px] border-l-[2px] border-yellow-300/60 rounded-bl-md" />
+          <span className="absolute bottom-0.5 left-1 text-[10px] text-amber-300/80">✦</span>
+        </div>
+
+        {/* Corner ornaments — bottom-right */}
+        <div className="absolute bottom-0 right-0 w-10 h-10">
+          <div className="absolute bottom-0 right-0 w-8 h-8 border-b-[3px] border-r-[3px] border-amber-400 rounded-br-lg" />
+          <div className="absolute bottom-1 right-1 w-5 h-5 border-b-[2px] border-r-[2px] border-yellow-300/60 rounded-br-md" />
+          <span className="absolute bottom-0.5 right-1 text-[10px] text-amber-300/80">✦</span>
+        </div>
+
+        {/* Mid-edge ornaments */}
+        <div className="absolute top-1/2 -translate-y-1/2 left-[3px] text-amber-400/50 text-xs">❧</div>
+        <div className="absolute top-1/2 -translate-y-1/2 right-[3px] text-amber-400/50 text-xs">❧</div>
+      </div>
+
+      {/* Inner subtle gold glow */}
+      <div className="absolute inset-[6px] z-20 pointer-events-none border border-amber-500/10 shadow-[inset_0_0_30px_rgba(251,191,36,0.05)]" />
+
       {/* ASMR Enhancer glow border effect */}
       {enhancerActive && isActive && (
         <div className="absolute inset-0 z-10 pointer-events-none">
-          <div className="absolute inset-0 rounded-none border-[3px] border-purple-500/30 animate-pulse" />
+          <div className="absolute inset-0 border-[3px] border-purple-500/30 animate-pulse" />
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-purple-500/60 to-transparent" />
         </div>
@@ -254,7 +301,7 @@ export default function VideoCard({
       {/* YouTube Player Container */}
       <div
         ref={containerRef}
-        className="absolute inset-0 flex items-center justify-center cursor-pointer"
+        className="absolute inset-[6px] flex items-center justify-center cursor-pointer"
         onClick={(e) => {
           handleContainerClick();
           handleDoubleTap();
@@ -286,10 +333,10 @@ export default function VideoCard({
       )}
 
       {/* Gradient overlay at bottom */}
-      <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none" />
+      <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none z-20" />
 
       {/* Gradient overlay at top */}
-      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent pointer-events-none z-20" />
 
       {/* Double-tap heart animation */}
       {doubleTapHeart && (
@@ -299,6 +346,57 @@ export default function VideoCard({
           </span>
         </div>
       )}
+
+      {/* === NAVIGATION ARROWS === */}
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 z-30 flex flex-col gap-3">
+        {/* Up arrow */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateUp();
+          }}
+          disabled={isFirst}
+          className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-md transition-all duration-300 ${
+            isFirst
+              ? "bg-white/5 text-white/20 cursor-not-allowed"
+              : "bg-white/10 text-white/80 hover:bg-amber-500/30 hover:text-amber-200 active:scale-90 shadow-lg border border-white/10"
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path
+              d="M10 4L4 10M10 4L16 10M10 4V16"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+
+        {/* Down arrow */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateDown();
+          }}
+          disabled={isLast}
+          className={`flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-md transition-all duration-300 ${
+            isLast
+              ? "bg-white/5 text-white/20 cursor-not-allowed"
+              : "bg-white/10 text-white/80 hover:bg-amber-500/30 hover:text-amber-200 active:scale-90 shadow-lg border border-white/10"
+          }`}
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path
+              d="M10 16L4 10M10 16L16 10M10 16V4"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
 
       {/* Video info overlay */}
       <div
@@ -311,7 +409,6 @@ export default function VideoCard({
           <span className="text-white font-semibold text-sm truncate max-w-[200px]">
             {channelTitle}
           </span>
-          {/* ASMR Enhancer badge */}
           {enhancerActive && (
             <div className="flex items-center gap-1 rounded-full bg-purple-500/30 border border-purple-400/40 px-2 py-0.5">
               <span className="text-[10px]">✨</span>

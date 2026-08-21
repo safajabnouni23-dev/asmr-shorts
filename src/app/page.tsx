@@ -349,6 +349,31 @@ export default function Home() {
     }
   }, []);
 
+  // === Navigation handlers ===
+  const handleNavigateUp = useCallback(() => {
+    const feed = feedRef.current;
+    if (!feed) return;
+    const currentIdx = activeIndex;
+    if (currentIdx > 0) {
+      const targetEl = feed.querySelector(`[data-video-index="${currentIdx - 1}"]`);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  }, [activeIndex]);
+
+  const handleNavigateDown = useCallback(() => {
+    const feed = feedRef.current;
+    if (!feed) return;
+    const currentIdx = activeIndex;
+    if (currentIdx < videos.length - 1) {
+      const targetEl = feed.querySelector(`[data-video-index="${currentIdx + 1}"]`);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  }, [activeIndex, videos.length]);
+
   // Loading screen
   if (needsOnboarding === null) {
     return (
@@ -465,6 +490,10 @@ export default function Home() {
                 onWatched={handleWatched}
                 isActive={index === activeIndex}
                 onUnlockSound={activateSound}
+                onNavigateUp={handleNavigateUp}
+                onNavigateDown={handleNavigateDown}
+                isFirst={index === 0}
+                isLast={index === videos.length - 1}
               />
             </div>
           ))}
