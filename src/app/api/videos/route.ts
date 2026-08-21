@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { searchASMRVideos, YouTubeVideo } from "@/lib/youtube";
 import { isASMRContent } from "@/lib/gemini";
 import { FALLBACK_VIDEOS } from "@/lib/fallback";
-import { TIKTOK_ASRM_VIDEOS } from "@/lib/tiktok-data";
+import { searchDailymotionASMR, getDailymotionEmbedUrl } from "@/lib/dailymotion";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
 
   const deviceId = req.nextUrl.searchParams.get("deviceId");
   const pageToken = req.nextUrl.searchParams.get("pageToken") || undefined;
+  const dmPage = parseInt(req.nextUrl.searchParams.get("dmPage") || "1", 10);
   const excludeIds =
     req.nextUrl.searchParams.get("excludeIds")?.split(",").filter(Boolean) ||
     [];
@@ -59,60 +60,87 @@ export async function GET(req: NextRequest) {
     console.log("[/api/videos] DB error:", (dbErr as Error).message);
   }
 
-  // === STEP 1: Try YouTube API ===
-  let rawVideos: YouTubeVideo[] = [];
-  let nextPageToken: string | null = null;
-  let youtubeSuccess = false;
+  // === PARALLEL FETCH: YouTube + Dailymotion ===
+  const [ytResult, dmResult] = await Promise.allSettled([
+    // YouTube fetch
+    (async () => {
+      try {
+        console.log("[/api/videos] Fetching YouTube...");
+        return await searchASMRVideos(
+          userGender,
+          maleRatio,
+          pageToken,
+          excludeIds,
+          isNewVisitor
+        );
+      } catch (err) {
+        console.log("[/api/videos] YouTube FAILED:", (err as Error).message);
+        return { videos: [], nextPageToken: null };
+      }
+    })(),
+    // Dailymotion fetch
+    (async () => {
+      try {
+        console.log("[/api/videos] Fetching Dailymotion...");
+        return await searchDailymotionASMR(dmPage, excludeIds);
+      } catch (err) {
+        console.log("[/api/videos] Dailymotion FAILED:", (err as Error).message);
+        return { videos: [], nextPage: null };
+      }
+    })(),
+  ]);
 
-  try {
-    console.log("[/api/videos] Trying YouTube...");
-    const result = await searchASMRVideos(
-      userGender,
-      maleRatio,
-      pageToken,
-      excludeIds,
-      isNewVisitor
-    );
-    rawVideos = result.videos;
-    nextPageToken = result.nextPageToken;
-    youtubeSuccess = rawVideos.length > 0;
-    console.log("[/api/videos] YouTube:", rawVideos.length, "videos");
-  } catch (ytErr) {
-    console.log("[/api/videos] YouTube FAILED:", (ytErr as Error).message);
+  // Process YouTube results
+  let ytVideos: YouTubeVideo[] = [];
+  let ytNextPage: string | null = null;
+  if (ytResult.status === "fulfilled") {
+    ytVideos = ytResult.value.videos;
+    ytNextPage = ytResult.value.nextPageToken;
   }
+  console.log("[/api/videos] YouTube:", ytVideos.length, "videos");
 
-  // === STEP 2: Filter YouTube videos ===
-  let approvedVideos: YouTubeVideo[] = [];
+  // Process Dailymotion results
+  let dmVideos: Array<{
+    videoId: string;
+    embedUrl: string;
+    title: string;
+    channelTitle: string;
+    viewCount: number;
+    source: "dailymotion";
+  }> = [];
+  let dmNextPage: number | null = null;
+  if (dmResult.status === "fulfilled") {
+    dmVideos = dmResult.value.videos;
+    dmNextPage = dmResult.value.nextPage;
+  }
+  console.log("[/api/videos] Dailymotion:", dmVideos.length, "videos");
 
-  if (youtubeSuccess) {
+  // === Filter YouTube videos ===
+  let approvedYt: YouTubeVideo[] = [];
+  if (ytVideos.length > 0) {
     if (isNewVisitor) {
       // Quick filter for new visitors
-      for (const video of rawVideos) {
-        const title = video.title.toLowerCase();
-        const desc = video.description.toLowerCase();
-        const hasAsmrKeywords =
-          title.includes("asmr") || desc.includes("asmr") ||
-          title.includes("whisper") || title.includes("tingles") ||
-          title.includes("triggers") || title.includes("relax") ||
-          title.includes("sleep");
-        if (hasAsmrKeywords) approvedVideos.push(video);
+      for (const v of ytVideos) {
+        const t = v.title.toLowerCase();
+        const d = v.description.toLowerCase();
+        if (t.includes("asmr") || d.includes("asmr") || t.includes("whisper") ||
+            t.includes("tingles") || t.includes("triggers") || t.includes("relax") ||
+            t.includes("sleep")) {
+          approvedYt.push(v);
+        }
       }
     } else {
       // Full Gemini filter for returning visitors
-      for (const video of rawVideos) {
+      for (const v of ytVideos) {
         let approved = true;
-        try {
-          approved = await isASMRContent(video.title, video.description);
-        } catch { approved = true; }
-        if (approved) approvedVideos.push(video);
+        try { approved = await isASMRContent(v.title, v.description); } catch { approved = true; }
+        if (approved) approvedYt.push(v);
       }
     }
   }
+  console.log("[/api/videos] YouTube approved:", approvedYt.length);
 
-  console.log("[/api/videos] YouTube approved:", approvedVideos.length);
-
-  // === STEP 3: Smart Fallback — Mix TikTok if YouTube is weak ===
-  const MIN_VIDEOS = 8; // Minimum acceptable videos
+  // === Build final mixed feed ===
   const finalVideos: Array<{
     videoId: string;
     title: string;
@@ -120,12 +148,12 @@ export async function GET(req: NextRequest) {
     thumbnailUrl: string;
     channelTitle: string;
     viewCount: number;
-    source: "youtube" | "tiktok";
+    source: "youtube" | "dailymotion";
     embedUrl?: string;
   }> = [];
 
-  // Add approved YouTube videos
-  for (const v of approvedVideos) {
+  // Add YouTube videos
+  for (const v of approvedYt) {
     finalVideos.push({
       videoId: v.videoId,
       title: v.title,
@@ -137,56 +165,52 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // If YouTube didn't return enough, add TikTok videos
-  if (finalVideos.length < MIN_VIDEOS) {
-    console.log("[/api/videos] YouTube weak (" + finalVideos.length + ") — adding TikTok fallback");
-    const tiktokFiltered = TIKTOK_ASRM_VIDEOS.filter(
-      (t) => !excludeIds.includes(t.videoId)
-    );
-    for (const t of tiktokFiltered) {
-      finalVideos.push({
-        videoId: t.videoId,
-        title: t.title,
-        description: "",
-        thumbnailUrl: "",
-        channelTitle: t.channelTitle,
-        viewCount: t.viewCount,
-        source: "tiktok",
-        embedUrl: t.embedUrl,
-      });
-    }
+  // Add Dailymotion videos
+  for (const d of dmVideos) {
+    finalVideos.push({
+      videoId: d.videoId,
+      title: d.title,
+      description: "",
+      thumbnailUrl: "",
+      channelTitle: d.channelTitle,
+      viewCount: d.viewCount,
+      source: "dailymotion",
+      embedUrl: d.embedUrl || getDailymotionEmbedUrl(d.videoId),
+    });
   }
 
-  // If still no videos at all, use YouTube fallback + TikTok
+  // If both sources failed, use fallback
   if (finalVideos.length === 0) {
-    console.log("[/api/videos] Total fallback — YouTube fallback + TikTok");
+    console.log("[/api/videos] Both sources failed — using fallback");
     for (const v of FALLBACK_VIDEOS) {
       if (!excludeIds.includes(v.videoId)) {
         finalVideos.push({ ...v, source: "youtube" });
       }
     }
-    for (const t of TIKTOK_ASRM_VIDEOS) {
-      if (!excludeIds.includes(t.videoId)) {
-        finalVideos.push({
-          videoId: t.videoId,
-          title: t.title,
-          description: "",
-          thumbnailUrl: "",
-          channelTitle: t.channelTitle,
-          viewCount: t.viewCount,
-          source: "tiktok",
-          embedUrl: t.embedUrl,
-        });
-      }
-    }
   }
 
-  console.log("[/api/videos] Final mix:", finalVideos.length, "videos | YouTube:", finalVideos.filter(v => v.source === "youtube").length, "| TikTok:", finalVideos.filter(v => v.source === "tiktok").length);
+  // Shuffle to mix YouTube and Dailymotion (but keep high-view first for new visitors)
+  if (!isNewVisitor && finalVideos.length > 4) {
+    // Light shuffle — keep top 2, shuffle the rest
+    const top = finalVideos.slice(0, 2);
+    const rest = finalVideos.slice(2);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    finalVideos.length = 0;
+    finalVideos.push(...top, ...rest);
+  }
+
+  console.log("[/api/videos] Final mix:", finalVideos.length,
+    "| YT:", finalVideos.filter(v => v.source === "youtube").length,
+    "| DM:", finalVideos.filter(v => v.source === "dailymotion").length);
 
   return NextResponse.json({
     videos: finalVideos,
-    nextPageToken: youtubeSuccess ? nextPageToken : null,
-    source: youtubeSuccess ? "youtube" : "hybrid",
+    nextPageToken: ytNextPage,
+    dmPage: dmNextPage,
+    source: approvedYt.length > 0 ? "hybrid" : "fallback",
     isNewVisitor,
   });
 }

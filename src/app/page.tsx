@@ -26,7 +26,7 @@ interface VideoData {
   thumbnailUrl: string;
   channelTitle: string;
   viewCount: number;
-  source: "youtube" | "tiktok";
+  source: "youtube" | "dailymotion";
   embedUrl?: string;
 }
 
@@ -49,6 +49,7 @@ export default function Home() {
   // Video feed state
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [dmPage, setDmPage] = useState(1); // Dailymotion page counter
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -70,12 +71,14 @@ export default function Home() {
   const loadingRef = useRef(false);
   const hasMoreRef = useRef(true);
   const nextPageTokenRef = useRef<string | null>(null);
+  const dmPageRef = useRef(1);
   const deviceIdRef = useRef("");
   const fetchInProgressRef = useRef(false);
 
   // Keep refs in sync with state
   useEffect(() => { loadingRef.current = loading; }, [loading]);
   useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+  useEffect(() => { dmPageRef.current = dmPage; }, [dmPage]);
   useEffect(() => { nextPageTokenRef.current = nextPageToken; }, [nextPageToken]);
   useEffect(() => { deviceIdRef.current = deviceId; }, [deviceId]);
 
@@ -170,6 +173,7 @@ export default function Home() {
       const params = new URLSearchParams({
         deviceId: deviceIdRef.current,
         excludeIds: recentWatched.join(","),
+        dmPage: String(dmPageRef.current),
       });
       const token = pageToken || nextPageTokenRef.current;
       if (token) params.set("pageToken", token);
@@ -187,7 +191,9 @@ export default function Home() {
           return [...prev, ...newVideos];
         });
         setNextPageToken(data.nextPageToken);
-        if (!data.nextPageToken) {
+        if (data.dmPage) setDmPage(data.dmPage);
+        // Keep hasMore true as long as either source has more
+        if (!data.nextPageToken && !data.dmPage) {
           setHasMore(false);
           hasMoreRef.current = false;
         }

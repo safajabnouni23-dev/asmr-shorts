@@ -39,7 +39,7 @@ interface VideoCardProps {
   viewCount: number;
   isLiked: boolean;
   soundUnlocked: boolean;
-  source: "youtube" | "tiktok";
+  source: "youtube" | "dailymotion";
   embedUrl?: string;
   onLike: (videoId: string) => void;
   onUnlike: (videoId: string) => void;
@@ -80,7 +80,7 @@ export default function VideoCard({
   const [doubleTapHeart, setDoubleTapHeart] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [enhancerActive, setEnhancerActive] = useState(false);
-  const [tiktokLoaded, setTiktokLoaded] = useState(false);
+  const [dmLoaded, setDmLoaded] = useState(false);
   const lastTapRef = useRef(0);
   const initializedRef = useRef(false);
 
@@ -154,12 +154,11 @@ export default function VideoCard({
     };
   }, [videoId, iframeId, source]);
 
-  // === TikTok Player — reset when video or active state changes ===
+  // === Dailymotion Player — reset when video or active state changes ===
   useEffect(() => {
-    if (source !== "tiktok") return;
+    if (source !== "dailymotion") return;
     if (isActive) {
-      // Becoming active — reset loading state so iframe re-renders fresh
-      setTiktokLoaded(false);
+      setDmLoaded(false);
     }
     initializedRef.current = false;
   }, [videoId, source, isActive]);
@@ -231,8 +230,8 @@ export default function VideoCard({
   };
 
   const handleShare = () => {
-    const url = source === "tiktok"
-      ? `https://www.tiktok.com/@video/${videoId}`
+    const url = source === "dailymotion"
+      ? `https://www.dailymotion.com/video/${videoId}`
       : `https://youtube.com/shorts/${videoId}`;
     if (navigator.share) {
       navigator.share({ title, url }).catch(() => {});
@@ -286,7 +285,7 @@ export default function VideoCard({
         </div>
       )}
 
-      {/* === PLAYER: YouTube or TikTok === */}
+      {/* === PLAYER: YouTube or Dailymotion === */}
       <div
         ref={containerRef}
         className="absolute inset-[6px] flex items-center justify-center cursor-pointer"
@@ -299,65 +298,38 @@ export default function VideoCard({
           /* YouTube Player */
           <div id={iframeId} className="h-full w-full" />
         ) : isActive ? (
-          /* TikTok Player — ONLY rendered when active (fixes audio leak) */
+          /* Dailymotion Player — ONLY rendered when active (prevents audio leak) */
           <div className="h-full w-full relative overflow-hidden bg-black">
-            {/* 
-              AGGRESSIVE CROP: Scale iframe up 115% and center it.
-              This crops out ALL TikTok UI elements:
-              - Header bar (top ~55px)
-              - Username & description (bottom ~100px)  
-              - Like/share/comment buttons (right ~50px)
-              - Watermark overlay
-              Only the pure video content remains visible.
-            */}
-            <div
+            <iframe
+              key={videoId}
+              id={iframeId}
+              src={`${embedUrl || `https://www.dailymotion.com/embed/video/${videoId}`}?autoplay=1&mute=0&ui-start-screen-info=false&ui-logo=false&sharing-enable=false&endscreen-enable=false&queue-enable=false`}
               style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                width: "115%",
-                height: "115%",
-                transform: "translate(-50%, -50%)",
-                overflow: "hidden",
+                border: "none",
+                borderRadius: "0",
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                pointerEvents: "auto",
               }}
-            >
-              <iframe
-                key={videoId}
-                id={iframeId}
-                src={`${embedUrl || `https://www.tiktok.com/embed/v2/${videoId}`}?autoplay=1&mute=0&sound=1&related=0&repeat=1`}
-                style={{
-                  border: "none",
-                  borderRadius: "0",
-                  width: "100%",
-                  height: "100%",
-                  pointerEvents: "auto",
-                }}
-                allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
-                allowFullScreen
-                title={title}
-                onLoad={() => setTiktokLoaded(true)}
-                referrerPolicy="no-referrer-when-downgrade"
-              />
-            </div>
-
-            {/* Thick black edge masks — guarantee no TikTok UI leaks */}
-            <div className="absolute top-0 left-0 right-0 h-2 bg-black z-10 pointer-events-none" />
-            <div className="absolute bottom-0 left-0 right-0 h-2 bg-black z-10 pointer-events-none" />
-            <div className="absolute top-0 right-0 bottom-0 w-2 bg-black z-10 pointer-events-none" />
-            <div className="absolute top-0 left-0 bottom-0 w-2 bg-black z-10 pointer-events-none" />
-
+              allow="autoplay; encrypted-media; fullscreen; picture-in-picture;"
+              allowFullScreen
+              title={title}
+              onLoad={() => setDmLoaded(true)}
+              referrerPolicy="no-referrer-when-downgrade"
+            />
             {/* Loading overlay */}
-            {!tiktokLoaded && (
+            {!dmLoaded && (
               <div className="absolute inset-0 flex items-center justify-center bg-black z-20">
                 <div className="flex flex-col items-center gap-3">
-                  <div className="h-10 w-10 animate-spin rounded-full border-3 border-pink-500 border-t-transparent" />
-                  <span className="text-white/50 text-xs">TikTok</span>
+                  <div className="h-10 w-10 animate-spin rounded-full border-3 border-blue-500 border-t-transparent" />
+                  <span className="text-white/50 text-xs">Dailymotion</span>
                 </div>
               </div>
             )}
           </div>
         ) : (
-          /* Inactive TikTok — render BLACK SCREEN only (no iframe = no audio leak) */
+          /* Inactive Dailymotion — render BLACK SCREEN only (no iframe = no audio leak) */
           <div className="h-full w-full bg-black" />
         )}
       </div>
@@ -422,12 +394,12 @@ export default function VideoCard({
       {/* Source badge */}
       <div className="absolute top-16 left-4 z-20">
         <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold ${
-          source === "tiktok"
-            ? "bg-pink-500/30 text-pink-200 border border-pink-400/30"
+          source === "dailymotion"
+            ? "bg-blue-500/30 text-blue-200 border border-blue-400/30"
             : "bg-red-500/30 text-red-200 border border-red-400/30"
         }`}>
-          <span>{source === "tiktok" ? "🎵" : "▶️"}</span>
-          <span>{source === "tiktok" ? "TikTok" : "YouTube"}</span>
+          <span>{source === "dailymotion" ? "🎬" : "▶️"}</span>
+          <span>{source === "dailymotion" ? "Dailymotion" : "YouTube"}</span>
         </div>
       </div>
 

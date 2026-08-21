@@ -45,8 +45,8 @@ export const FALLBACK_VIDEOS = [
   },
   {
     videoId: "JtezyaCb5Ks",
-    title: "TIKTOK'S MOST FAMOUS ASMR TRIGGERS! 🚀",
-    description: "Viral ASMR triggers from TikTok. Female creators with satisfying sounds.",
+    title: "MOST FAMOUS ASMR TRIGGERS! 🚀",
+    description: "Viral ASMR triggers. Female creators with satisfying sounds.",
     thumbnailUrl: "https://i.ytimg.com/vi/JtezyaCb5Ks/hqdefault.jpg",
     channelTitle: "ASMR Viral",
     viewCount: 7800000,
