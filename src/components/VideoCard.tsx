@@ -1,0 +1,364 @@
+"use client";
+
+import { useRef, useState, useEffect, useCallback } from "react";
+import { formatViews } from "@/lib/utils";
+
+// Load YouTube IFrame API once
+let ytApiReady = false;
+let ytApiLoading = false;
+const ytApiCallbacks: Array<() => void> = [];
+
+function loadYouTubeAPI(callback: () => void) {
+  if (ytApiReady) {
+    callback();
+    return;
+  }
+  ytApiCallbacks.push(callback);
+  if (ytApiLoading) return;
+  ytApiLoading = true;
+
+  const tag = document.createElement("script");
+  tag.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(tag);
+
+  // YouTube calls this when ready
+  (window as any).onYouTubeIframeAPIReady = () => {
+    ytApiReady = true;
+    ytApiCallbacks.forEach((cb) => cb());
+    ytApiCallbacks.length = 0;
+  };
+}
+
+interface VideoCardProps {
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  viewCount: number;
+  isLiked: boolean;
+  soundUnlocked: boolean;
+  onLike: (videoId: string) => void;
+  onUnlike: (videoId: string) => void;
+  onAdClick: () => void;
+  onWatched: (videoId: string) => void;
+  isActive: boolean;
+  onUnlockSound: () => void;
+}
+
+export default function VideoCard({
+  videoId,
+  title,
+  channelTitle,
+  viewCount,
+  isLiked,
+  soundUnlocked,
+  onLike,
+  onUnlike,
+  onAdClick,
+  onWatched,
+  isActive,
+  onUnlockSound,
+}: VideoCardProps) {
+  const playerRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const iframeId = `yt-player-${videoId}`;
+  const [showInfo, setShowInfo] = useState(true);
+  const [doubleTapHeart, setDoubleTapHeart] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
+  const lastTapRef = useRef(0);
+  const initializedRef = useRef(false);
+
+  // Track watched when active
+  useEffect(() => {
+    if (isActive) {
+      onWatched(videoId);
+    }
+  }, [isActive, videoId, onWatched]);
+
+  // Initialize YouTube Player
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    loadYouTubeAPI(() => {
+      if (!document.getElementById(iframeId)) return;
+
+      try {
+        const player = new (window as any).YT.Player(iframeId, {
+          videoId,
+          playerVars: {
+            autoplay: isActive ? 1 : 0,
+            mute: 1, // Always start muted for autoplay policy
+            loop: 1,
+            playlist: videoId,
+            playsinline: 1,
+            controls: 0,
+            modestbranding: 1,
+            rel: 0,
+            showinfo: 0,
+            fs: 0,
+            disablekb: 1,
+            iv_load_policy: 3,
+          },
+          events: {
+            onReady: () => {
+              setPlayerReady(true);
+              // If sound is already unlocked, unmute immediately
+              if (soundUnlocked && isActive) {
+                player.unMute();
+                player.setVolume(100);
+                player.playVideo();
+              }
+            },
+            onStateChange: (event: any) => {
+              // Auto-replay when video ends
+              if (event.data === (window as any).YT.PlayerState.ENDED) {
+                player.playVideo();
+              }
+            },
+          },
+        });
+
+        playerRef.current = player;
+      } catch (err) {
+        console.error("YT Player init error:", err);
+      }
+    });
+
+    return () => {
+      try {
+        if (playerRef.current?.destroy) {
+          playerRef.current.destroy();
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    };
+  }, [videoId, iframeId]);
+
+  // Play/pause based on active state
+  useEffect(() => {
+    if (!playerRef.current || !playerReady) return;
+    try {
+      if (isActive) {
+        playerRef.current.playVideo();
+      } else {
+        playerRef.current.pauseVideo();
+      }
+    } catch {
+      // Player not ready
+    }
+  }, [isActive, playerReady]);
+
+  // Handle sound unlock — DIRECT API call, not just state
+  useEffect(() => {
+    if (!playerRef.current || !playerReady || !soundUnlocked) return;
+    try {
+      playerRef.current.unMute();
+      playerRef.current.setVolume(100);
+      if (isActive) {
+        playerRef.current.playVideo();
+      }
+    } catch {
+      // Player error
+    }
+  }, [soundUnlocked, playerReady, isActive]);
+
+  // Handle click to unlock sound
+  const handleContainerClick = useCallback(() => {
+    if (!soundUnlocked) {
+      onUnlockSound();
+      // Direct unmute via YouTube API
+      if (playerRef.current && playerReady) {
+        try {
+          playerRef.current.unMute();
+          playerRef.current.setVolume(100);
+          playerRef.current.playVideo();
+        } catch {
+          // Player error
+        }
+      }
+    }
+  }, [soundUnlocked, onUnlockSound, playerReady]);
+
+  const handleDoubleTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      if (!isLiked) {
+        onLike(videoId);
+      }
+      setDoubleTapHeart(true);
+      setTimeout(() => setDoubleTapHeart(false), 800);
+    }
+    lastTapRef.current = now;
+  }, [isLiked, onLike, videoId]);
+
+  const handleLikeToggle = () => {
+    if (isLiked) {
+      onUnlike(videoId);
+    } else {
+      onLike(videoId);
+    }
+  };
+
+  const handleShare = () => {
+    const url = `https://youtube.com/shorts/${videoId}`;
+    if (navigator.share) {
+      navigator.share({ title, url }).catch(() => {});
+    } else {
+      navigator.clipboard?.writeText(url);
+    }
+  };
+
+  return (
+    <div className="relative h-screen w-full snap-start flex-shrink-0 bg-black overflow-hidden">
+      {/* YouTube Player Container */}
+      <div
+        ref={containerRef}
+        className="absolute inset-0 flex items-center justify-center cursor-pointer"
+        onClick={(e) => {
+          handleContainerClick();
+          handleDoubleTap();
+        }}
+      >
+        <div id={iframeId} className="h-full w-full" />
+      </div>
+
+      {/* Sound unlock overlay — covers entire screen until first click */}
+      {!soundUnlocked && isActive && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-[1px] cursor-pointer"
+          onClick={handleContainerClick}
+        >
+          <div className="flex flex-col items-center gap-4 animate-bounce">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full bg-white/15 backdrop-blur-md border-2 border-white/30 shadow-2xl">
+              <span className="text-5xl">🔇</span>
+            </div>
+            <div className="text-center px-6">
+              <p className="text-white text-lg font-bold drop-shadow-lg">
+                اضغط لتشغيل الصوت
+              </p>
+              <p className="text-white/60 text-sm mt-1">
+                Tap to enable sound 🔊
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gradient overlay at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/80 via-black/40 to-transparent pointer-events-none" />
+
+      {/* Gradient overlay at top */}
+      <div className="absolute top-0 left-0 right-0 h-24 bg-gradient-to-b from-black/60 to-transparent pointer-events-none" />
+
+      {/* Double-tap heart animation */}
+      {doubleTapHeart && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+          <span className="text-7xl animate-ping text-red-500 drop-shadow-lg">
+            ❤️
+          </span>
+        </div>
+      )}
+
+      {/* Video info overlay */}
+      <div
+        className={`absolute bottom-20 left-4 right-20 z-20 transition-opacity duration-300 ${showInfo ? "opacity-100" : "opacity-0"}`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-bold">
+            {channelTitle.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-white font-semibold text-sm truncate max-w-[200px]">
+            {channelTitle}
+          </span>
+        </div>
+        <p className="text-white/90 text-sm leading-relaxed line-clamp-2 max-w-[280px]">
+          {title}
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-white/50 text-xs">
+            {formatViews(viewCount)} مشاهدة
+          </span>
+          <span className="text-white/30 text-xs">•</span>
+          <span className="text-white/50 text-xs">#ASMR</span>
+        </div>
+      </div>
+
+      {/* Right action buttons */}
+      <div className="absolute bottom-28 right-3 z-20 flex flex-col items-center gap-5">
+        {/* Like button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleLikeToggle();
+          }}
+          className="flex flex-col items-center gap-1 transition-transform active:scale-125"
+        >
+          <div
+            className={`flex h-12 w-12 items-center justify-center rounded-full backdrop-blur-md transition-all ${
+              isLiked
+                ? "bg-red-500/30 shadow-lg shadow-red-500/30"
+                : "bg-white/10"
+            }`}
+          >
+            <span className={`text-xl ${isLiked ? "drop-shadow-lg" : ""}`}>
+              {isLiked ? "❤️" : "🤍"}
+            </span>
+          </div>
+          <span className="text-[10px] text-white/70 font-medium">إعجاب</span>
+        </button>
+
+        {/* Ad / Unlock button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdClick();
+          }}
+          className="flex flex-col items-center gap-1 transition-transform active:scale-125"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 shadow-lg shadow-orange-500/40">
+            <span className="text-xl">🔒</span>
+          </div>
+          <span className="text-[10px] text-orange-300 font-bold">افتح</span>
+        </button>
+
+        {/* Share button */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleShare();
+          }}
+          className="flex flex-col items-center gap-1 transition-transform active:scale-125"
+        >
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 backdrop-blur-md">
+            <span className="text-xl">↗️</span>
+          </div>
+          <span className="text-[10px] text-white/70 font-medium">مشاركة</span>
+        </button>
+
+        {/* Toggle info */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowInfo((p) => !p);
+          }}
+          className="flex flex-col items-center gap-1 transition-transform active:scale-125"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md">
+            <span className="text-sm">{showInfo ? "👁" : "👁‍🗨"}</span>
+          </div>
+        </button>
+      </div>
+
+      {/* Spinning music disc */}
+      <div className="absolute bottom-8 right-4 z-20">
+        <div
+          className={`h-10 w-10 rounded-full border-2 border-white/30 bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center shadow-lg ${isActive ? "animate-spin" : ""}`}
+          style={{ animationDuration: "3s" }}
+        >
+          <div className="h-4 w-4 rounded-full bg-gradient-to-br from-purple-400 to-pink-400" />
+        </div>
+      </div>
+    </div>
+  );
+}
